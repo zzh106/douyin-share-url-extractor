@@ -2,7 +2,7 @@
  * 抖音视频链接导出工具 - 前端脚本
  */
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'http://localhost:5001';
 
 // DOM 元素
 const userInput = document.getElementById('userInput');
@@ -173,10 +173,35 @@ async function fetchUserVideos() {
             body: JSON.stringify({ sec_user_id: secUserId }),
         });
         
-        const data = await response.json();
+        // 先读取响应文本（Response 对象只能读取一次）
+        const text = await response.text();
         
+        // 检查响应状态
         if (!response.ok) {
-            throw new Error(data.error || '请求失败');
+            // 尝试解析错误响应
+            let errorMsg = '请求失败';
+            try {
+                if (text && text.trim() !== '') {
+                    const errorData = JSON.parse(text);
+                    errorMsg = errorData.error || `服务器错误 (${response.status})`;
+                } else {
+                    errorMsg = `服务器错误 (${response.status}): ${response.statusText}`;
+                }
+            } catch (e) {
+                errorMsg = `服务器错误 (${response.status}): ${response.statusText}`;
+            }
+            throw new Error(errorMsg);
+        }
+        
+        // 解析 JSON 响应
+        let data;
+        try {
+            if (!text || text.trim() === '') {
+                throw new Error('服务器返回空响应');
+            }
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error('服务器返回的数据格式错误，请稍后重试');
         }
         
         // 渲染结果
