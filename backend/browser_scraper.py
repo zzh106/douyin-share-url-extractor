@@ -151,15 +151,21 @@ def fetch_user_videos_browser(
                     pass
                 
                 # 滚动页面加载所有视频（实时提取模式）
-                print("正在滚动页面加载所有视频...")
+                print("=" * 60)
+                print("🚀 开始滚动页面加载所有视频...")
+                print("=" * 60)
                 scroll_count = 0
                 last_height = 0
                 last_video_count = 0
                 no_change_count = 0  # 连续无变化次数
-                max_no_change = 5  # 连续无变化次数阈值（增加到5次）
+                max_no_change = 10  # 连续无变化次数阈值（增加到10次，更保守）
                 
                 # 大幅增加最大滚动次数，确保能加载所有视频
-                effective_max_scroll = max(max_scroll, 500)  # 至少500次，或使用传入的值
+                effective_max_scroll = max(max_scroll, 2000)  # 至少2000次，确保能加载2000+视频
+                
+                print(f"📊 最大滚动次数: {effective_max_scroll}")
+                print(f"⏱️  开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                print("-" * 60)
                 
                 while scroll_count < effective_max_scroll:
                     # 在每次滚动前，先提取当前已加载的视频（实时提取）
@@ -202,13 +208,20 @@ def fetch_user_videos_browser(
                                                 for (let elem of elems) {
                                                     const text = elem.textContent?.trim();
                                                     // 过滤条件：有文本、长度合理、不是URL、不是纯数字、不是"无标题"
+                                                    // 过滤无效文本：登录、热门、关注、点赞、评论等
+                                                    const invalidTexts = ['登录', '热门', '关注', '点赞', '评论', '分享', '收藏', 
+                                                                          '热门:', '登录:', '关注:', '点赞:', '评论:', '分享:', 
+                                                                          '热门推荐', '登录账号', '立即登录', '请登录'];
+                                                    const isInvalid = invalidTexts.some(invalid => text.includes(invalid));
+                                                    
                                                     if (text && 
                                                         text.length >= 2 && 
                                                         text.length <= 200 && 
                                                         !text.includes('http') && 
                                                         !text.match(/^\\d+$/) &&
                                                         text !== '无标题' &&
-                                                        !text.match(/^[\\s\\n\\r]*$/)) {
+                                                        !text.match(/^[\\s\\n\\r]*$/) &&
+                                                        !isInvalid) {
                                                         // 检查是否包含太多换行（可能是多个元素合并的文本）
                                                         const lineCount = (text.match(/\\n/g) || []).length;
                                                         if (lineCount <= 3) {
@@ -242,12 +255,19 @@ def fetch_user_videos_browser(
                                                 const textElems = current.querySelectorAll('span, div, p, h1, h2, h3, h4');
                                                 for (let elem of textElems) {
                                                     const text = elem.textContent?.trim();
+                                                    // 过滤无效文本
+                                                    const invalidTexts = ['登录', '热门', '关注', '点赞', '评论', '分享', '收藏', 
+                                                                          '热门:', '登录:', '关注:', '点赞:', '评论:', '分享:', 
+                                                                          '热门推荐', '登录账号', '立即登录', '请登录'];
+                                                    const isInvalid = invalidTexts.some(invalid => text.includes(invalid));
+                                                    
                                                     if (text && 
                                                         text.length >= 2 && 
                                                         text.length <= 200 && 
                                                         !text.includes('http') &&
                                                         !text.match(/^\\d+$/) &&
-                                                        text !== '无标题') {
+                                                        text !== '无标题' &&
+                                                        !isInvalid) {
                                                         // 确保这个文本不在链接内
                                                         if (!link.contains(elem)) {
                                                             title = text;
@@ -299,11 +319,16 @@ def fetch_user_videos_browser(
                         
                         current_video_count = len(all_videos)
                         if current_video_count > last_video_count:
-                            print(f"已提取 {current_video_count} 个视频（滚动 {scroll_count} 次）")
+                            new_videos = current_video_count - last_video_count
+                            progress = (current_video_count / 2000 * 100) if current_video_count < 2000 else 100
+                            print(f"✅ 滚动 {scroll_count} 次 | 新增 {new_videos} 个 | 总计 {current_video_count} 个视频 | 进度 {progress:.1f}%")
                             last_video_count = current_video_count
                             no_change_count = 0  # 有新视频，重置计数
+                        elif scroll_count > 0 and scroll_count % 20 == 0:
+                            # 每20次滚动显示一次状态
+                            print(f"⏳ 滚动 {scroll_count} 次 | 当前 {current_video_count} 个视频 | 无新视频")
                     except Exception as e:
-                        print(f"实时提取视频时出错: {e}")
+                        print(f"⚠️ 实时提取视频时出错: {e}")
                     
                     # 获取当前页面高度
                     try:
@@ -311,11 +336,19 @@ def fetch_user_videos_browser(
                     except:
                         current_height = 0
                     
-                    # 滚动到底部
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight || document.documentElement.scrollHeight)")
+                    # 滚动到底部（使用平滑滚动，更接近真实用户行为）
+                    page.evaluate("""
+                        () => {
+                            window.scrollTo({
+                                top: document.body.scrollHeight || document.documentElement.scrollHeight,
+                                behavior: 'smooth'
+                            });
+                        }
+                    """)
                     
-                    # 等待新内容加载
-                    time.sleep(2)
+                    # 等待新内容加载（根据视频数量调整等待时间）
+                    wait_time = 2 if current_video_count < 100 else 3
+                    time.sleep(wait_time)
                     
                     # 检查是否已经到底
                     try:
@@ -337,18 +370,30 @@ def fetch_user_videos_browser(
                         
                         # 如果连续多次高度和视频数量都没有变化，可能已经加载完
                         if no_change_count >= max_no_change:
-                            print(f"连续 {no_change_count} 次滚动无新内容，当前已提取 {len(all_videos)} 个视频，停止滚动")
+                            print("-" * 60)
+                            print(f"⏹️  连续 {no_change_count} 次滚动无新内容")
+                            print(f"📊 当前已提取 {len(all_videos)} 个视频")
+                            print(f"🛑 停止滚动")
+                            print("-" * 60)
                             break
                     else:
+                        # 页面高度有变化，重置无变化计数
+                        if no_change_count > 0:
+                            print(f"📈 页面高度变化: {last_height} -> {new_height}，继续滚动...")
                         no_change_count = 0  # 有变化，重置计数
                     
                     last_height = new_height
                     scroll_count += 1
-                    if scroll_count % 10 == 0:  # 每10次打印一次
-                        print(f"已滚动 {scroll_count} 次，当前高度: {new_height}，已提取 {len(all_videos)} 个视频")
+                    
+                    # 每50次滚动显示一次详细状态
+                    if scroll_count % 50 == 0:
+                        elapsed_time = time.strftime('%H:%M:%S', time.gmtime(scroll_count * wait_time))
+                        print(f"📊 滚动进度: {scroll_count}/{effective_max_scroll} ({scroll_count/effective_max_scroll*100:.1f}%) | 已提取 {len(all_videos)} 个视频 | 页面高度: {new_height}px")
                 
                 # 最终提取：确保所有视频都被提取（作为补充）
-                print("正在进行最终提取...")
+                print("-" * 60)
+                print("🔍 正在进行最终提取，确保不遗漏任何视频...")
+                print("-" * 60)
                 try:
                     final_videos = page.evaluate("""
                         () => {
@@ -423,17 +468,24 @@ def fetch_user_videos_browser(
                                             const textElems = current.querySelectorAll('span, div, p, h1, h2, h3, h4');
                                             for (let elem of textElems) {
                                                 const text = elem.textContent?.trim();
-                                                if (text && 
-                                                    text.length >= 2 && 
-                                                    text.length <= 200 && 
-                                                    !text.includes('http') &&
-                                                    !text.match(/^\\d+$/) &&
-                                                    text !== '无标题') {
-                                                    if (!link.contains(elem)) {
-                                                        title = text;
-                                                        break;
+                                                    // 过滤无效文本
+                                                    const invalidTexts = ['登录', '热门', '关注', '点赞', '评论', '分享', '收藏', 
+                                                                          '热门:', '登录:', '关注:', '点赞:', '评论:', '分享:', 
+                                                                          '热门推荐', '登录账号', '立即登录', '请登录'];
+                                                    const isInvalid = invalidTexts.some(invalid => text.includes(invalid));
+                                                    
+                                                    if (text && 
+                                                        text.length >= 2 && 
+                                                        text.length <= 200 && 
+                                                        !text.includes('http') &&
+                                                        !text.match(/^\\d+$/) &&
+                                                        text !== '无标题' &&
+                                                        !isInvalid) {
+                                                        if (!link.contains(elem)) {
+                                                            title = text;
+                                                            break;
+                                                        }
                                                     }
-                                                }
                                             }
                                             if (title !== '无标题') break;
                                             current = current.parentElement;
@@ -529,7 +581,11 @@ def fetch_user_videos_browser(
             seen_urls.add(url)
             unique_videos.append(video)
     
-    print(f"✅ 成功提取 {len(unique_videos)} 个视频")
+    print("=" * 60)
+    print(f"✅ 提取完成！")
+    print(f"📊 总共提取 {len(unique_videos)} 个视频")
+    print(f"⏱️  结束时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
     return unique_videos
 
 
