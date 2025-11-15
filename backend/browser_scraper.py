@@ -150,13 +150,161 @@ def fetch_user_videos_browser(
                 except:
                     pass
                 
-                # 滚动页面加载所有视频
+                # 滚动页面加载所有视频（实时提取模式）
                 print("正在滚动页面加载所有视频...")
                 scroll_count = 0
                 last_height = 0
+                last_video_count = 0
                 no_change_count = 0  # 连续无变化次数
+                max_no_change = 5  # 连续无变化次数阈值（增加到5次）
                 
-                while scroll_count < max_scroll:
+                # 大幅增加最大滚动次数，确保能加载所有视频
+                effective_max_scroll = max(max_scroll, 500)  # 至少500次，或使用传入的值
+                
+                while scroll_count < effective_max_scroll:
+                    # 在每次滚动前，先提取当前已加载的视频（实时提取）
+                    try:
+                        current_videos = page.evaluate("""
+                            () => {
+                                const videos = [];
+                                // 查找所有视频链接
+                                const links = document.querySelectorAll('a[href*="/video/"]');
+                                
+                                links.forEach(link => {
+                                    const href = link.getAttribute('href');
+                                    if (href) {
+                                        const fullUrl = href.startsWith('/') 
+                                            ? 'https://www.douyin.com' + href 
+                                            : href;
+                                        
+                                        let title = '无标题';
+                                        
+                                        // 方法1: 查找视频卡片容器（抖音常见的容器类名）
+                                        const card = link.closest('[class*="item"], [class*="card"], [class*="video"], [data-e2e], [class*="VideoItem"], [class*="video-item"]');
+                                        
+                                        if (card) {
+                                            // 在卡片中查找描述文本，使用多种选择器
+                                            const selectors = [
+                                                '[class*="desc"]',
+                                                '[class*="title"]',
+                                                '[class*="text"]',
+                                                '[class*="content"]',
+                                                '[class*="info"]',
+                                                'span[class*="text"]',
+                                                'div[class*="desc"]',
+                                                'p[class*="desc"]',
+                                                '[data-e2e*="desc"]',
+                                                '[data-e2e*="title"]'
+                                            ];
+                                            
+                                            for (let selector of selectors) {
+                                                const elems = card.querySelectorAll(selector);
+                                                for (let elem of elems) {
+                                                    const text = elem.textContent?.trim();
+                                                    // 过滤条件：有文本、长度合理、不是URL、不是纯数字、不是"无标题"
+                                                    if (text && 
+                                                        text.length >= 2 && 
+                                                        text.length <= 200 && 
+                                                        !text.includes('http') && 
+                                                        !text.match(/^\\d+$/) &&
+                                                        text !== '无标题' &&
+                                                        !text.match(/^[\\s\\n\\r]*$/)) {
+                                                        // 检查是否包含太多换行（可能是多个元素合并的文本）
+                                                        const lineCount = (text.match(/\\n/g) || []).length;
+                                                        if (lineCount <= 3) {
+                                                            title = text;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                if (title !== '无标题') break;
+                                            }
+                                            
+                                            // 如果还没找到，尝试查找所有文本节点
+                                            if (title === '无标题') {
+                                                const allText = card.textContent?.trim();
+                                                if (allText && allText.length > 0) {
+                                                    // 提取第一行或前100个字符作为标题
+                                                    const firstLine = allText.split('\\n')[0] || allText.substring(0, 100);
+                                                    if (firstLine.length >= 2 && firstLine.length <= 200 && !firstLine.includes('http')) {
+                                                        title = firstLine.trim();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 方法2: 从链接的父元素向上查找
+                                        if (title === '无标题') {
+                                            let current = link.parentElement;
+                                            let depth = 0;
+                                            while (current && depth < 8) {
+                                                // 查找当前元素的所有子元素中的文本
+                                                const textElems = current.querySelectorAll('span, div, p, h1, h2, h3, h4');
+                                                for (let elem of textElems) {
+                                                    const text = elem.textContent?.trim();
+                                                    if (text && 
+                                                        text.length >= 2 && 
+                                                        text.length <= 200 && 
+                                                        !text.includes('http') &&
+                                                        !text.match(/^\\d+$/) &&
+                                                        text !== '无标题') {
+                                                        // 确保这个文本不在链接内
+                                                        if (!link.contains(elem)) {
+                                                            title = text;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                if (title !== '无标题') break;
+                                                current = current.parentElement;
+                                                depth++;
+                                            }
+                                        }
+                                        
+                                        // 方法3: 从链接的属性获取
+                                        if (title === '无标题') {
+                                            title = link.getAttribute('aria-label') || 
+                                                   link.getAttribute('title') || 
+                                                   link.getAttribute('data-title') ||
+                                                   '无标题';
+                                            if (title && (title.length < 2 || title.includes('http'))) {
+                                                title = '无标题';
+                                            }
+                                        }
+                                        
+                                        videos.push({
+                                            url: fullUrl,
+                                            title: title || '无标题'
+                                        });
+                                    }
+                                });
+                                return videos;
+                            }
+                        """)
+                        
+                        # 添加新发现的视频
+                        for video in current_videos:
+                            url = video.get('url', '')
+                            if url and url not in video_urls:
+                                video_urls.add(url)
+                                match = re.search(r'/video/(\d+)', url)
+                                video_id = match.group(1) if match else ''
+                                
+                                all_videos.append({
+                                    "title": video.get('title', '无标题').strip() or '无标题',
+                                    "share_url": url,
+                                    "create_time": "",
+                                    "aweme_id": video_id
+                                })
+                        
+                        current_video_count = len(all_videos)
+                        if current_video_count > last_video_count:
+                            print(f"已提取 {current_video_count} 个视频（滚动 {scroll_count} 次）")
+                            last_video_count = current_video_count
+                            no_change_count = 0  # 有新视频，重置计数
+                    except Exception as e:
+                        print(f"实时提取视频时出错: {e}")
+                    
                     # 获取当前页面高度
                     try:
                         current_height = page.evaluate("document.body.scrollHeight || document.documentElement.scrollHeight")
@@ -166,8 +314,8 @@ def fetch_user_videos_browser(
                     # 滚动到底部
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight || document.documentElement.scrollHeight)")
                     
-                    # 等待新内容加载（增加等待时间）
-                    time.sleep(3)
+                    # 等待新内容加载
+                    time.sleep(2)
                     
                     # 检查是否已经到底
                     try:
@@ -187,82 +335,126 @@ def fetch_user_videos_browser(
                         except:
                             pass
                         
-                        # 如果连续3次高度没有变化，可能已经加载完
-                        if no_change_count >= 3:
-                            print(f"连续 {no_change_count} 次滚动无新内容，停止滚动")
+                        # 如果连续多次高度和视频数量都没有变化，可能已经加载完
+                        if no_change_count >= max_no_change:
+                            print(f"连续 {no_change_count} 次滚动无新内容，当前已提取 {len(all_videos)} 个视频，停止滚动")
                             break
                     else:
                         no_change_count = 0  # 有变化，重置计数
                     
                     last_height = new_height
                     scroll_count += 1
-                    if scroll_count % 5 == 0:  # 每5次打印一次
-                        print(f"已滚动 {scroll_count} 次，当前高度: {new_height}")
+                    if scroll_count % 10 == 0:  # 每10次打印一次
+                        print(f"已滚动 {scroll_count} 次，当前高度: {new_height}，已提取 {len(all_videos)} 个视频")
                 
-                # 提取所有视频链接
-                print("正在提取视频链接...")
-                
-                # 方法1: 查找所有指向 /video/ 的链接
+                # 最终提取：确保所有视频都被提取（作为补充）
+                print("正在进行最终提取...")
                 try:
-                    video_links = page.query_selector_all('a[href*="/video/"]')
-                except Exception as e:
-                    print(f"查找视频链接失败: {e}")
-                    video_links = []
-                
-                for link in video_links:
-                    try:
-                        href = link.get_attribute('href')
-                        if href:
-                            # 转换为完整 URL
-                            if href.startswith('/'):
-                                full_url = urljoin('https://www.douyin.com', href)
-                            elif href.startswith('http'):
-                                full_url = href
-                            else:
-                                continue
-                            
-                            # 提取视频 ID
-                            match = re.search(r'/video/(\d+)', full_url)
-                            if match:
-                                video_id = match.group(1)
-                                if full_url not in video_urls:
-                                    video_urls.add(full_url)
-                                    
-                                    # 尝试获取视频标题
-                                    title = "无标题"
-                                    try:
-                                        # 查找标题元素（根据实际页面结构调整）
-                                        title_elem = link.query_selector('text')
-                                        if title_elem:
-                                            title = title_elem.inner_text()
-                                    except:
-                                        pass
-                                    
-                                    all_videos.append({
-                                        "title": title,
-                                        "share_url": full_url,
-                                        "create_time": "",
-                                        "aweme_id": video_id
-                                    })
-                    except Exception as e:
-                        print(f"提取链接失败: {e}")
-                        continue
-                
-                # 方法2: 从页面中提取所有视频 URL（通过 JavaScript）
-                try:
-                    js_videos = page.evaluate("""
+                    final_videos = page.evaluate("""
                         () => {
                             const videos = [];
                             const links = document.querySelectorAll('a[href*="/video/"]');
+                            
                             links.forEach(link => {
                                 const href = link.getAttribute('href');
                                 if (href) {
                                     const fullUrl = href.startsWith('/') 
                                         ? 'https://www.douyin.com' + href 
                                         : href;
+                                    
+                                    let title = '无标题';
+                                    
+                                    // 查找视频卡片容器
+                                    const card = link.closest('[class*="item"], [class*="card"], [class*="video"], [data-e2e], [class*="VideoItem"], [class*="video-item"]');
+                                    
+                                    if (card) {
+                                        // 在卡片中查找描述文本，使用多种选择器
+                                        const selectors = [
+                                            '[class*="desc"]',
+                                            '[class*="title"]',
+                                            '[class*="text"]',
+                                            '[class*="content"]',
+                                            '[class*="info"]',
+                                            'span[class*="text"]',
+                                            'div[class*="desc"]',
+                                            'p[class*="desc"]',
+                                            '[data-e2e*="desc"]',
+                                            '[data-e2e*="title"]'
+                                        ];
+                                        
+                                        for (let selector of selectors) {
+                                            const elems = card.querySelectorAll(selector);
+                                            for (let elem of elems) {
+                                                const text = elem.textContent?.trim();
+                                                if (text && 
+                                                    text.length >= 2 && 
+                                                    text.length <= 200 && 
+                                                    !text.includes('http') && 
+                                                    !text.match(/^\\d+$/) &&
+                                                    text !== '无标题' &&
+                                                    !text.match(/^[\\s\\n\\r]*$/)) {
+                                                    const lineCount = (text.match(/\\n/g) || []).length;
+                                                    if (lineCount <= 3) {
+                                                        title = text;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if (title !== '无标题') break;
+                                        }
+                                        
+                                        // 如果还没找到，尝试查找所有文本节点
+                                        if (title === '无标题') {
+                                            const allText = card.textContent?.trim();
+                                            if (allText && allText.length > 0) {
+                                                const firstLine = allText.split('\\n')[0] || allText.substring(0, 100);
+                                                if (firstLine.length >= 2 && firstLine.length <= 200 && !firstLine.includes('http')) {
+                                                    title = firstLine.trim();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 从链接的父元素向上查找
+                                    if (title === '无标题') {
+                                        let current = link.parentElement;
+                                        let depth = 0;
+                                        while (current && depth < 8) {
+                                            const textElems = current.querySelectorAll('span, div, p, h1, h2, h3, h4');
+                                            for (let elem of textElems) {
+                                                const text = elem.textContent?.trim();
+                                                if (text && 
+                                                    text.length >= 2 && 
+                                                    text.length <= 200 && 
+                                                    !text.includes('http') &&
+                                                    !text.match(/^\\d+$/) &&
+                                                    text !== '无标题') {
+                                                    if (!link.contains(elem)) {
+                                                        title = text;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if (title !== '无标题') break;
+                                            current = current.parentElement;
+                                            depth++;
+                                        }
+                                    }
+                                    
+                                    // 从链接的属性获取
+                                    if (title === '无标题') {
+                                        title = link.getAttribute('aria-label') || 
+                                               link.getAttribute('title') || 
+                                               link.getAttribute('data-title') ||
+                                               '无标题';
+                                        if (title && (title.length < 2 || title.includes('http'))) {
+                                            title = '无标题';
+                                        }
+                                    }
+                                    
                                     videos.push({
                                         url: fullUrl,
-                                        title: link.textContent || '无标题'
+                                        title: title || '无标题'
                                     });
                                 }
                             });
@@ -270,21 +462,31 @@ def fetch_user_videos_browser(
                         }
                     """)
                     
-                    for video in js_videos:
+                    # 添加最终发现的视频（去重）
+                    for video in final_videos:
                         url = video.get('url', '')
                         if url and url not in video_urls:
                             video_urls.add(url)
                             match = re.search(r'/video/(\d+)', url)
                             video_id = match.group(1) if match else ''
                             
+                            title = video.get('title', '无标题').strip()
+                            if not title or title == '无标题':
+                                # 如果标题还是无标题，尝试从页面DOM中查找
+                                try:
+                                    # 这里可以添加更复杂的标题查找逻辑
+                                    pass
+                                except:
+                                    pass
+                            
                             all_videos.append({
-                                "title": video.get('title', '无标题'),
+                                "title": title or '无标题',
                                 "share_url": url,
                                 "create_time": "",
                                 "aweme_id": video_id
                             })
                 except Exception as e:
-                    print(f"JavaScript 提取失败: {e}")
+                    print(f"最终提取失败: {e}")
                 
                 browser.close()
                 
@@ -345,5 +547,6 @@ def get_user_videos_browser_fallback(
     Returns:
         视频列表，格式: [{"title": "...", "share_url": "...", "create_time": "..."}, ...]
     """
-    return fetch_user_videos_browser(sec_user_id, cookies, headless=True)
+    # 使用更大的滚动次数，确保能加载所有视频
+    return fetch_user_videos_browser(sec_user_id, cookies, headless=True, max_scroll=1000)
 
