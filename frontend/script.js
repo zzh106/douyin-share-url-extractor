@@ -173,6 +173,23 @@ async function fetchUserVideos() {
     fetchBtn.disabled = true;
     
     try {
+        // 先检查后端服务是否可用（使用 Promise.race 实现超时）
+        try {
+            const healthCheckPromise = fetch(`${API_BASE_URL}/health`, {
+                method: 'GET'
+            });
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('连接超时')), 3000)
+            );
+            
+            const healthCheck = await Promise.race([healthCheckPromise, timeoutPromise]);
+            if (!healthCheck.ok) {
+                throw new Error('后端服务不可用');
+            }
+        } catch (healthErr) {
+            throw new Error('无法连接到后端服务。请确保后端服务正在运行（端口 5001）。');
+        }
+        
         // 调用后端 API
         const response = await fetch(`${API_BASE_URL}/api/fetch_user_videos`, {
             method: 'POST',
@@ -233,7 +250,18 @@ async function fetchUserVideos() {
         
     } catch (err) {
         console.error('获取视频失败:', err);
-        showError(err.message || '获取视频列表失败，请检查网络连接或 sec_user_id 是否正确');
+        
+        // 提供更友好的错误提示
+        let errorMessage = err.message || '获取视频列表失败';
+        
+        // 检查是否是网络连接错误
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('fetch')) {
+            errorMessage = '无法连接到后端服务。请确保后端服务正在运行（端口 5001）。\n\n解决方法：\n1. 检查后端服务是否启动\n2. 确认端口 5001 未被占用\n3. 检查防火墙设置';
+        } else if (err.message.includes('CORS')) {
+            errorMessage = '跨域请求被阻止。请确保后端服务已启用 CORS 支持。';
+        }
+        
+        showError(errorMessage);
     } finally {
         loading.classList.add('hidden');
         fetchBtn.disabled = false;
