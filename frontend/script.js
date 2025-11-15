@@ -91,19 +91,26 @@ function renderVideoList(videoListData) {
         return;
     }
     
-    videoList.innerHTML = videos.map((video, index) => `
+    videoList.innerHTML = videos.map((video, index) => {
+        // 支持新的 share_url 字段，兼容旧的 url 字段
+        const shareUrl = video.share_url || video.url || '';
+        const createTime = video.create_time || '';
+        
+        return `
         <div class="video-item">
             <div class="video-number">${index + 1}</div>
             <div class="video-content">
                 <div class="video-title">${escapeHtml(video.title || '无标题')}</div>
+                ${createTime ? `<div class="video-time">发布时间: ${escapeHtml(createTime)}</div>` : ''}
                 <div class="video-url">
-                    <a href="${video.url}" target="_blank" rel="noopener noreferrer">
-                        ${video.url}
+                    <a href="${shareUrl}" target="_blank" rel="noopener noreferrer">
+                        ${shareUrl}
                     </a>
                 </div>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
     
     resultSection.classList.remove('hidden');
 }
@@ -126,9 +133,11 @@ function exportToTxt() {
         return;
     }
     
-    // 生成 TXT 内容
+    // 生成 TXT 内容（支持 share_url 和 url）
     const lines = videos.map((video, index) => {
-        return `${index + 1}. ${video.title}\n${video.url}\n`;
+        const shareUrl = video.share_url || video.url || '';
+        const createTime = video.create_time ? ` [${video.create_time}]` : '';
+        return `${index + 1}. ${video.title}${createTime}\n${shareUrl}\n`;
     });
     
     const content = lines.join('\n');
@@ -204,8 +213,23 @@ async function fetchUserVideos() {
             throw new Error('服务器返回的数据格式错误，请稍后重试');
         }
         
+        // 检查新的响应格式（包含 videos 字段）
+        let videos = data.videos || data;
+        const method = data.method || 'unknown';
+        const count = data.count || videos.length;
+        
+        // 显示使用的方案
+        if (method) {
+            const methodNames = {
+                'api': 'API 方式',
+                'browser': '浏览器自动化方式',
+                'browser_fallback': '浏览器自动化方式（API 失败后回退）'
+            };
+            console.log(`使用方案: ${methodNames[method] || method}`);
+        }
+        
         // 渲染结果
-        renderVideoList(data);
+        renderVideoList(videos);
         
     } catch (err) {
         console.error('获取视频失败:', err);

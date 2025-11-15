@@ -1,14 +1,18 @@
 # douyin-web-exporter
 
-一个简单易用的 Web 工具，用于提取抖音用户所有公开视频的标题和分享链接。
+一个专业的抖音视频链接提取工具，支持 API 方式和浏览器自动化两种方案，用于提取抖音用户所有公开视频的 share_url。
 
 ## ✨ 功能特点
 
 - 🔍 通过用户主页 URL 或 `sec_user_id` 提取视频
-- 📋 自动分页获取所有公开视频
-- 📥 一键导出为 TXT 文件
+- 📋 自动分页获取所有公开视频的 **share_url**
+- 🔄 **双方案支持**：优先使用 API 方式，失败时自动回退到浏览器自动化
+- 🌐 **浏览器自动化**：使用 Playwright 模拟真实浏览器，更稳定可靠
+- 🔑 支持 access_token 和 Cookie 认证
+- 📥 一键导出为 TXT 文件（包含标题、发布时间、share_url）
 - 🎨 简洁美观的深色主题界面
-- 🚀 无需登录，无需数据库
+- 💻 支持命令行和 Web 两种使用方式
+- 🚀 无需数据库
 
 ## 📁 项目结构
 
@@ -30,9 +34,10 @@ douyin-web-exporter/
 
 ## 🛠 技术栈
 
-- **后端**: Flask + Requests
+- **后端**: Flask + Requests + Playwright
 - **前端**: 原生 HTML + JavaScript + CSS
 - **API**: 抖音官方 Web API
+- **浏览器自动化**: Playwright（备用方案）
 
 ## 📦 安装与运行
 
@@ -41,6 +46,9 @@ douyin-web-exporter/
 ```bash
 cd backend
 pip install -r requirements.txt
+
+# 如果使用浏览器自动化方式，需要安装 Playwright 浏览器
+playwright install chromium
 ```
 
 ### 2. 启动后端服务
@@ -70,7 +78,41 @@ python -m http.server 8000
 
 安装 Live Server 插件后，右键点击 `index.html` 选择 "Open with Live Server"
 
-## 📖 使用说明
+## 💻 命令行使用（推荐）
+
+### 基本用法
+
+```bash
+cd backend
+python fetch_videos.py MS4wLjABAAAA...
+```
+
+### 高级用法
+
+```bash
+# 使用浏览器方式
+python fetch_videos.py MS4wLjABAAAA... --use-browser
+
+# 提供 Cookie
+python fetch_videos.py MS4wLjABAAAA... --cookie "your_cookie_string"
+
+# 输出为 JSON
+python fetch_videos.py MS4wLjABAAAA... --json
+
+# 仅输出 share_url 列表
+python fetch_videos.py MS4wLjABAAAA... --list-only
+
+# 保存到指定文件
+python fetch_videos.py MS4wLjABAAAA... --output my_videos.txt
+```
+
+### 查看帮助
+
+```bash
+python fetch_videos.py --help
+```
+
+## 📖 Web 界面使用
 
 ### 如何获取 sec_user_id
 
