@@ -142,7 +142,8 @@ def fetch_user_post_videos_api(
                 # 检查响应内容
                 if not response.text or response.text.strip() == '':
                     if max_cursor == 0:
-                        raise Exception("抖音 API 返回空响应")
+                        # 提供更详细的错误信息
+                        raise Exception("抖音 API 返回空响应。这可能是因为：1) 需要登录 Cookie；2) API 端点已变更；3) 网络问题。建议使用浏览器自动化方式或提供有效的 Cookie。")
                     else:
                         break
                 
